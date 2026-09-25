@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>flowline</title>
+<style>body{font-family:system-ui,sans-serif;margin:24px;max-width:960px}
+textarea{width:100%;height:120px;font-family:ui-monospace,monospace}
+button{padding:6px 12px;margin:8px 8px 8px 0}pre{background:#f6f6f6;padding:10px;border-radius:6px;overflow:auto}
+.ok{color:#0a7}.bad{color:#c00}</style>
+</head>
+<body>
+<h1>flowline 管线工作台</h1>
+<p>每行一条数据（格式 值,耗时）。点运行看处理进度、水位与背压峰值。</p>
+<textarea id="input">3,2
+5,1
+9,3
+7,1
+4,2</textarea>
+<div><button id="run">运行</button><button id="crash">运行到一半崩</button><span id="status" class="ok">等待</span></div>
+<pre id="out">还没跑</pre>
+<script type="module">
+import { runPipeline, resume } from "./pipe.js";
+
+function parse(text) {
+  return text.split("\n").filter((s) => s.trim() !== "").map((line) => {
+    const parts = line.split(",");
+    return { value: Number(parts[0]), cost: Number(parts[1] || 1) };
+  });
+}
+
+function show(label, result) {
+  const status = document.getElementById("status");
+  status.className = "ok";
+  status.textContent = label + " 处理 " + result.processed + " 条 水位 " + result.watermark;
+  document.getElementById("out").textContent = [
+    "处理条数 = " + result.processed,
+    "水位（已确认位置） = " + result.watermark,
+    "重试次数 = " + result.retries,
+    "背压峰值（缓冲条数） = " + result.buffer_peak,
+    "每条结果 = " + JSON.stringify(result.values),
+    "错误码 = " + String(result.error)
+  ].join("\n");
+}
+
+document.getElementById("run").addEventListener("click", () => {
+  try { show("运行完成", runPipeline(parse(document.getElementById("input").value), { buffer_limit: 2 })); }
+  catch (error) { const s = document.getElementById("status"); s.className = "bad"; s.textContent = "异常 " + error.message; }
+});
+
+document.getElementById("crash").addEventListener("click", () => {
+  const data = parse(document.getElementById("input").value);
+  const first = runPipeline(data.slice(0, 2), { buffer_limit: 2, crash_after: 2 });
+  const rest = resume(first.state, data, { buffer_limit: 2 });
+  const s = document.getElementById("status");
+  s.className = "ok";
+  s.textContent = "崩溃后从水位 " + first.state.watermark + " 续跑到 " + rest.watermark;
+  document.getElementById("out").textContent = "崩溃前水位 = " + first.state.watermark +
+    "\n续跑后水位 = " + rest.watermark + "\n续跑处理条数 = " + rest.processed +
+    "\n续跑后结果 = " + JSON.stringify(rest.values);
+});
+</script>
+</body>
+</html>
